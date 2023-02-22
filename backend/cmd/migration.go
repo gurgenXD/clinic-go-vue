@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -11,6 +12,15 @@ import (
 
 const (
 	migrationsDir = "migrations"
+
+	stepsFlag      = "steps"
+	stepsFlagShort = "s"
+	stepsDefault   = 0
+	stepsUsage     = "Number of migrated versions."
+)
+
+var (
+	steps uint
 )
 
 var (
@@ -19,11 +29,6 @@ var (
 	migrationCmd = &cobra.Command{
 		Use:   "migration",
 		Short: "Database migrations",
-	}
-
-	migrationMakeCmd = &cobra.Command{
-		Use:   "make",
-		Short: "Migration make",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var err error
 			url := "postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable&search_path=clinic"
@@ -39,7 +44,26 @@ var (
 		Use:   "up",
 		Short: "Migration upgrade",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Print("Migration upgrade\n")
+			err := cmd.Parent().RunE(cmd.Parent(), args)
+			if err != nil {
+				return fmt.Errorf("Failed to migrate: %w", err)
+			}
+
+			if steps == 0 {
+				if err = migration.Up(); err != nil {
+					if errors.Is(err, migrate.ErrNoChange) {
+						fmt.Println("Migration has no changes.")
+						return nil
+					}
+
+					return fmt.Errorf("Falied to upgrade: %w", err)
+				}
+			} else {
+				if err = migration.Steps(int(steps)); err != nil {
+					return fmt.Errorf("Falied to upgrade for %d step(s): %w", steps, err)
+				}
+			}
+
 			return nil
 		},
 	}
@@ -48,12 +72,25 @@ var (
 		Use:   "down",
 		Short: "Migration downgrade",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Print("Migration downgrade\n")
+			err := cmd.Parent().RunE(cmd.Parent(), args)
+			if err != nil {
+				return fmt.Errorf("Failed to migrate: %w", err)
+			}
+
+			if err = migration.Steps(-1); err != nil {
+				return fmt.Errorf("Falied to downgrade for 1 step: %w", err)
+			}
+
 			return nil
 		},
 	}
 )
 
 func init() {
-	migrationCmd.AddCommand(migrationMakeCmd, migrationUpCmd, migrationDownCmd)
+	migrationCmd.AddCommand(migrationUpCmd, migrationDownCmd)
+
+	migrationCmd.PersistentFlags().UintVarP(
+		&steps, stepsFlag, stepsFlagShort, stepsDefault, stepsUsage,
+	)
+
 }
